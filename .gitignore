@@ -1,0 +1,6 @@
+.claude/
+.venv/
+__pycache__/
+trades.log
+.git/
+mm_position.png
