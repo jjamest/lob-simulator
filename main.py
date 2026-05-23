@@ -10,7 +10,7 @@ _seq = itertools.count(1)
 class Order:
     order_id: str
     side: str # bid or ask
-    price: float
+    price: Optional[float]  # None = market order
     qty: int
     seq: int = field(default_factory=lambda: next(_seq))
 
@@ -51,26 +51,28 @@ class OrderBook:
 
     # Events
     def add(self, order: Order) -> list[Trade]:
-        """Add an order; match immediately if a trade is possible"""
+        """Add an order; match immediately if a trade is possible.
+        Market orders (price=None) sweep the book until filled or exhausted."""
         trades: list[Trade] = []
+        is_market = order.price is None
 
         if order.side == "bid":
             while order.qty > 0 and self.asks:
                 best = self.best_ask()
-                if order.price < best:
+                if not is_market and order.price < best:
                     break
                 trades += self._fill(order, self.asks, best)
-            if order.qty > 0:
+            if order.qty > 0 and not is_market:
                 self.bids[order.price].append(order)
                 self._index[order.order_id] = ("bid", order.price)
 
         elif order.side == "ask":
             while order.qty > 0 and self.bids:
                 best = self.best_bid()
-                if order.price > best:
+                if not is_market and order.price > best:
                     break
                 trades += self._fill(order, self.bids, best)
-            if order.qty > 0:
+            if order.qty > 0 and not is_market:
                 self.asks[order.price].append(order)
                 self._index[order.order_id] = ("ask", order.price)
 
