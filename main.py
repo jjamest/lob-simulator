@@ -17,8 +17,8 @@ class Order:
 
 @dataclass
 class Trade:
-    aggressor_id: str
-    resting_id: str
+    aggressor_id: str # trade coming in
+    resting_id: str # trade sitting
     price: float
     qty: int
 
@@ -31,7 +31,9 @@ class Trade:
 
 class OrderBook:
     """
-    Price-level dict of first in first out deques.
+    Price-level dict of first in first out deques. We use deques because of popleft() is O(1) 
+    while a pop(0) with a list if O(n), and not a queue because that doesn't support middle deletion like deques does with del q[i]
+
     bids[price] -> deque[Order]  (highest price = best bid)
     asks[price] -> deque[Order]  (lowest  price = best ask)
     _index maps order_id -> (side, price) for O(1) cancel lookup.
@@ -51,25 +53,28 @@ class OrderBook:
 
     # Events
     def add(self, order: Order) -> list[Trade]:
-        """Add an order; match immediately if a trade is possible"""
+        """
+        Add an order; match immediately if a trade is possible
+        Returns a list of trades that resulted from given order being added
+        """
         trades: list[Trade] = []
 
         if order.side == "bid":
             while order.qty > 0 and self.asks:
                 best = self.best_ask()
-                if order.price < best:
+                if order.price < best: # current bid price is lower than the lowest ask, meaning we cannot fill
                     break
-                trades += self._fill(order, self.asks, best)
-            if order.qty > 0:
+                trades += self._fill(order, self.asks, best) # fill the order
+            if order.qty > 0: # order is filled, but may be remaining quantities left to wait
                 self.bids[order.price].append(order)
                 self._index[order.order_id] = ("bid", order.price)
 
         elif order.side == "ask":
             while order.qty > 0 and self.bids:
                 best = self.best_bid()
-                if order.price > best:
+                if order.price > best: # current ask price is higher than the highest bid, meaning we cannot fill
                     break
-                trades += self._fill(order, self.bids, best)
+                trades += self._fill(order, self.bids, best) # fill the order
             if order.qty > 0:
                 self.asks[order.price].append(order)
                 self._index[order.order_id] = ("ask", order.price)
@@ -77,7 +82,7 @@ class OrderBook:
         return trades
 
     def cancel(self, order_id: str, quiet: bool = False) -> bool:
-        """Remove an order by ID. Returns True if found."""
+        """Remove an order by ID. Returns True if found, False if not found."""
         if order_id not in self._index:
             if not quiet:
                 print(f"  CANCEL {order_id} not found")
@@ -85,12 +90,12 @@ class OrderBook:
 
         side, price = self._index.pop(order_id)
         book_side = self.bids if side == "bid" else self.asks
-        q = book_side[price]
+        q = book_side[price] # deque
         for i, o in enumerate(q):
             if o.order_id == order_id:
-                del q[i]   # deque supports O(n) index delete
+                del q[i]   # deque supports O(n) index delete. only need to delete once
                 break
-        if not q:
+        if not q: # if the cancelled order was the last order, delete that price level
             del book_side[price]
         if not quiet:
             print(f"  CANCEL {order_id}  (side={side}, price={price})")
@@ -107,9 +112,9 @@ class OrderBook:
 
         trades: list[Trade] = []
         q = resting_side[price]
-        while q and aggressor.qty > 0:
+        while q and aggressor.qty > 0: # while remaininng agressor quantity left to continue filling...
             resting = q[0]
-            fill = min(aggressor.qty, resting.qty)
+            fill = min(aggressor.qty, resting.qty) # amount to fill
             trades.append(Trade(aggressor.order_id, resting.order_id, price, fill))
             aggressor.qty -= fill
             resting.qty -= fill

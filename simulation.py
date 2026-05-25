@@ -6,7 +6,7 @@ from typing import Optional
 from main import OrderBook, Order, Trade
 import matplotlib.pyplot as plt
 
-SEED = 36
+SEED = 34
 STEPS = 100_000
 FAIR_VALUE = 100.0
 TICK = 0.01 # min price increment
@@ -37,7 +37,7 @@ def random_order(book: OrderBook, rng: random.Random) -> Order:
         mid = FAIR_VALUE
 
     side = rng.choice(["bid", "ask"])
-    aggressive = rng.random() < 0.30 # 30 % chance of crossing the spread
+    aggressive = rng.random() < 0.30 # 30% chance of crossing the spread
 
     if aggressive:
         if side == "bid":
@@ -72,7 +72,7 @@ class MarketMaker:
         self.fill_count: int = 0
 
     def refresh_quotes(self, book: OrderBook, step: int) -> list[Order]:
-        """Cancel stale quotes and return fresh bid + ask to add to the book."""
+        """Cancel stale quotes and return new bid and ask to add to the book."""
         if self.bid_id:
             book.cancel(self.bid_id, quiet=True)
             self.bid_id = None
@@ -177,7 +177,7 @@ def run(steps: int = STEPS, seed: int = SEED) -> None:
     print(f"  MM fills            : {mm.fill_count:,}")
     print(f"  MM final position   : {mm.position:>+,}")
     print(f"  MM cash             : {mm.cash:>+,.2f}")
-    print(f"  MM mark-to-market   : {pnl:>+,.2f}  (mid={mid:.2f})")
+    print(f"  MM P&L   : {pnl:>+,.2f}  (mid={mid:.2f})")
     print(f"{'═'*60}")
 
     _plot_position_chart(mm.position_history)
