@@ -11,8 +11,15 @@ STEPS = 100_000
 FAIR_VALUE = 100.0
 TICK = 0.01 # min price increment
 
+# Ornstein-Uhlenbeck fair value parameters
+OU_THETA = 0.005   # mean-reversion speed (per step)
+OU_MU    = 100.0   # long-run mean
+OU_SIGMA = 0.05    # per-step volatility
+
 MM_HALF_SPREAD = 0.10 # MM quotes mid ± $0.10
-MM_QTY = 5
+MM_QTY = 10
+MM_SKEW_K = 0.01   # price skew per unit of inventory
+MM_QTY_K  = 0.10   # qty adjustment per unit of inventory (fraction of base qty)
 LOG_FILE = "trades.log"
 SNAPSHOT_EVERY = 1_000 # tell us progress every N steps
 
@@ -22,8 +29,13 @@ def _new_id(prefix: str = "O") -> str:
     return f"{prefix}{next(_oid)}"
 
 
-def random_order(book: OrderBook, rng: random.Random) -> Order:
-    """Random order generator"""
+def ou_step(fv: float, rng: random.Random) -> float:
+    """One step of the Ornstein-Uhlenbeck mean-reverting process."""
+    return fv + OU_THETA * (OU_MU - fv) + OU_SIGMA * rng.gauss(0, 1)
+
+
+def random_order(book: OrderBook, rng: random.Random, fv: float) -> Order:
+    """Random order generator anchored to the current fair value."""
     bb = book.best_bid()
     ba = book.best_ask()
 
@@ -34,20 +46,27 @@ def random_order(book: OrderBook, rng: random.Random) -> Order:
     elif ba:
         mid = ba - 0.50
     else:
-        mid = FAIR_VALUE
+        mid = fv
 
     side = rng.choice(["bid", "ask"])
+
+    # 10% chance of market order
+    if rng.random() < 0.10:
+        qty = int(rng.lognormvariate(1.5, 1.0)) + 1
+        return Order(_new_id(), side, None, qty)
+
     aggressive = rng.random() < 0.30 # 30% chance of crossing the spread
 
     if aggressive:
         if side == "bid":
             ref = ba if ba else mid
             price = round(ref + rng.uniform(0.01, 0.25), 2)
-        elif side == "ask":
+        else:
             ref = bb if bb else mid
             price = round(ref - rng.uniform(0.01, 0.25), 2)
     else:
-        raw = mid + rng.uniform(-1.50, 1.50)
+        # anchor to fair value rather than just mid to follow the OU process
+        raw = fv + rng.uniform(-1.50, 1.50)
         price = round(round(raw / TICK) * TICK, 2)
 
     qty = int(rng.lognormvariate(1.5, 1.0)) + 1 # median=6, and has spikes
@@ -61,9 +80,13 @@ class MarketMaker:
         self,
         half_spread: float = MM_HALF_SPREAD,
         qty: int = MM_QTY,
+        skew_k: float = MM_SKEW_K,
+        qty_k: float = MM_QTY_K,
     ) -> None:
         self.half_spread = half_spread
         self.qty = qty
+        self.skew_k = skew_k
+        self.qty_k = qty_k
         self.position: int = 0 # + long / - short
         self.cash: float = 0.0
         self.bid_id: Optional[str] = None
@@ -72,7 +95,9 @@ class MarketMaker:
         self.fill_count: int = 0
 
     def refresh_quotes(self, book: OrderBook, step: int) -> list[Order]:
-        """Cancel stale quotes and return new bid and ask to add to the book."""
+        """Cancel stale quotes and return new bid and ask to add to the book.
+        Quotes are skewed away from inventory: long → lower both prices to sell,
+        short → raise both to buy."""
         if self.bid_id:
             book.cancel(self.bid_id, quiet=True)
             self.bid_id = None
@@ -91,16 +116,26 @@ class MarketMaker:
         else:
             mid = FAIR_VALUE
 
-        bid_price = round(mid - self.half_spread, 2)
-        ask_price = round(mid + self.half_spread, 2)
+        # skew: positive position shifts mid down so we sell cheaper to unwind
+        skew = self.skew_k * self.position
+        skewed_mid = mid - skew
+
+        bid_price = round(skewed_mid - self.half_spread, 2)
+        ask_price = round(skewed_mid + self.half_spread, 2)
 
         self.position_history.append((step, self.position))
 
         if bid_price >= ask_price:
             return []
 
-        bid = Order(_new_id("MM"), "bid", bid_price, self.qty)
-        ask = Order(_new_id("MM"), "ask", ask_price, self.qty)
+        # When long: shrink bid qty (avoid buying more), grow ask qty (sell faster).
+        # When short: mirror. Clamp both sides to at least 1.
+        adj = self.qty_k * self.position
+        bid_qty = max(1, round(self.qty - adj))
+        ask_qty = max(1, round(self.qty + adj))
+
+        bid = Order(_new_id("MM"), "bid", bid_price, bid_qty)
+        ask = Order(_new_id("MM"), "ask", ask_price, ask_qty)
         self.bid_id = bid.order_id
         self.ask_id = ask.order_id
         return [bid, ask]
@@ -132,44 +167,65 @@ def run(steps: int = STEPS, seed: int = SEED) -> None:
     book = OrderBook()
     mm = MarketMaker()
     total_trades = 0
+    fv = FAIR_VALUE  # current Ornstein-Uhlenbeck fair value
+
+    # track resting order ids submitted by random agents so they can cancel them
+    resting_order_ids: list[str] = []
 
     print(f"Running {steps:,}-step simulation  (seed={seed})")
     print(f"Log to {LOG_FILE}\n")
 
     with open(LOG_FILE, "w", newline="") as fh:
         writer = csv.writer(fh)
-        writer.writerow(["step", "aggressor_id", "resting_id", "price", "qty"])
+        writer.writerow(["step", "aggressor_id", "resting_id", "price", "qty", "fair_value"])
 
         for step in range(1, steps + 1):
+            # 0. Evolve fair value via OU process
+            fv = ou_step(fv, rng)
+
             # 1. MM refreshes quotes
             for order in mm.refresh_quotes(book, step):
                 for t in book.add(order):
                     mm.on_trade(t)
-                    writer.writerow([step, t.aggressor_id, t.resting_id, t.price, t.qty])
+                    writer.writerow([step, t.aggressor_id, t.resting_id, t.price, t.qty, round(fv, 4)])
                     total_trades += 1
 
-            # 2. Random agent submits one order
-            for t in book.add(random_order(book, rng)):
+            # 2. Random agent: ~20% chance cancels one of its own stale resting orders
+            if resting_order_ids and rng.random() < 0.20:
+                cancel_id = rng.choice(resting_order_ids)
+                if book.cancel(cancel_id, quiet=True):
+                    resting_order_ids.remove(cancel_id)
+
+            # 3. Random agent submits one order
+            new_order = random_order(book, rng, fv)
+            trades = book.add(new_order)
+            # if the order rested (no trades and it was a limit order), track it
+            if not trades and new_order.price is not None:
+                resting_order_ids.append(new_order.order_id)
+            # trim the tracking list to avoid unbounded growth
+            if len(resting_order_ids) > 200:
+                resting_order_ids = resting_order_ids[-200:]
+            for t in trades:
                 mm.on_trade(t)
-                writer.writerow([step, t.aggressor_id, t.resting_id, t.price, t.qty])
+                writer.writerow([step, t.aggressor_id, t.resting_id, t.price, t.qty, round(fv, 4)])
                 total_trades += 1
 
-            # 3. Periodic stdout snapshot
+            # 4. Periodic stdout snapshot
             if step % SNAPSHOT_EVERY == 0:
                 bb = book.best_bid() or 0.0
                 ba = book.best_ask() or 0.0
-                mid = (bb + ba) / 2.0 if bb and ba else FAIR_VALUE
+                mid = (bb + ba) / 2.0 if bb and ba else fv
                 pnl = mm.cash + mm.position * mid
                 print(
                     f"  step {step:>6,}  |  pos={mm.position:>+5}  "
                     f"cash={mm.cash:>+10.2f}  pnl≈{pnl:>+8.2f}  "
-                    f"mid={mid:.2f}  MM-fills={mm.fill_count}"
+                    f"mid={mid:.2f}  fv={fv:.2f}  MM-fills={mm.fill_count}"
                 )
 
     # summary
     bb = book.best_bid() or 0.0
     ba = book.best_ask() or 0.0
-    mid = (bb + ba) / 2.0 if bb and ba else FAIR_VALUE
+    mid = (bb + ba) / 2.0 if bb and ba else fv
     pnl = mm.cash + mm.position * mid
 
     print(f"  Simulation finished  ({steps:,} steps)")

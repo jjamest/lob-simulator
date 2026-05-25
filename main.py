@@ -10,7 +10,7 @@ _seq = itertools.count(1)
 class Order:
     order_id: str
     side: str # bid or ask
-    price: float
+    price: Optional[float]  # None = market order
     qty: int
     seq: int = field(default_factory=lambda: next(_seq))
 
@@ -58,6 +58,7 @@ class OrderBook:
         Returns a list of trades that resulted from given order being added
         """
         trades: list[Trade] = []
+        is_market = order.price is None
 
         if order.side == "bid":
             while order.qty > 0 and self.asks:
