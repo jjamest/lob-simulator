@@ -12,14 +12,14 @@ FAIR_VALUE = 100.0
 TICK = 0.01 # min price increment
 
 # Ornstein-Uhlenbeck fair value parameters
-OU_THETA = 0.005   # mean-reversion speed (per step)
-OU_MU    = 100.0   # long-run mean
-OU_SIGMA = 0.05    # per-step volatility
+OU_THETA = 0.005 # mean-reversion speed (per step)
+OU_MU    = 100.0 # long-run mean
+OU_SIGMA = 0.05 # per-step volatility
 
-MM_HALF_SPREAD = 0.10 # MM quotes mid ± $0.10
+MM_HALF_SPREAD = 0.10 # MM quotes mid +/- $0.10
 MM_QTY = 10
-MM_SKEW_K = 0.01   # price skew per unit of inventory
-MM_QTY_K  = 0.10   # qty adjustment per unit of inventory (fraction of base qty)
+MM_SKEW_K = 0.01 # price skew per unit of inventory
+MM_QTY_K  = 0.10 # qty adjustment per unit of inventory (fraction of base qty)
 LOG_FILE = "trades.log"
 SNAPSHOT_EVERY = 1_000 # tell us progress every N steps
 

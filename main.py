@@ -57,26 +57,30 @@ class OrderBook:
         Add an order; match immediately if a trade is possible
         Returns a list of trades that resulted from given order being added
         """
+
+
         trades: list[Trade] = []
         is_market = order.price is None
 
         if order.side == "bid":
             while order.qty > 0 and self.asks:
                 best = self.best_ask()
-                if order.price < best: # current bid price is lower than the lowest ask, meaning we cannot fill
+                assert best is not None
+                if not is_market and order.price is not None and order.price < best:
                     break
-                trades += self._fill(order, self.asks, best) # fill the order
-            if order.qty > 0: # order is filled, but may be remaining quantities left to wait
+                trades += self._fill(order, self.asks, best)
+            if order.qty > 0 and order.price is not None:
                 self.bids[order.price].append(order)
                 self._index[order.order_id] = ("bid", order.price)
 
         elif order.side == "ask":
             while order.qty > 0 and self.bids:
                 best = self.best_bid()
-                if order.price > best: # current ask price is higher than the highest bid, meaning we cannot fill
+                assert best is not None
+                if not is_market and order.price is not None and order.price > best:
                     break
-                trades += self._fill(order, self.bids, best) # fill the order
-            if order.qty > 0:
+                trades += self._fill(order, self.bids, best)
+            if order.qty > 0 and order.price is not None:
                 self.asks[order.price].append(order)
                 self._index[order.order_id] = ("ask", order.price)
 
@@ -143,9 +147,9 @@ class OrderBook:
             print(f"    ${price:>7.2f}  total={total:<4}  {detail}")
 
         spread_str = "no spread"
-        if self.best_bid() and self.best_ask():
-            spread = self.best_ask() - self.best_bid()
-            spread_str = f"spread = ${spread:.2f}"
+        bb, ba = self.best_bid(), self.best_ask()
+        if bb is not None and ba is not None:
+            spread_str = f"spread = ${ba - bb:.2f}"
         print(f"\n  {'─── ' + spread_str + ' ───':^{W - 2}}\n")
 
         print("  BIDS")
