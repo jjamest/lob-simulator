@@ -8,6 +8,7 @@ from order import MarketSnapshot, OrderRequest, OrderSide
 class NoiseTrader(Agent):
     def __init__(
         self,
+        symbols: list[str],
         seed: Optional[int] = None,
         fair_value: float = 100.0,
         ou_theta: float = 0.005,
@@ -18,6 +19,7 @@ class NoiseTrader(Agent):
         aggressive_prob: float = 0.30,
         max_resting: int = 200,
     ) -> None:
+        self.symbols = symbols
         self.rng = random.Random(seed)
         self.fair_value = fair_value
         self.ou_theta = ou_theta
@@ -62,7 +64,7 @@ class NoiseTrader(Agent):
         if self.rng.random() < self.market_order_prob:
             # expected value from this log normal dist = 7.38906
             qty = int(self.rng.lognormvariate(1.5, 1.0)) + 1
-            order_request = OrderRequest(side, None, qty)
+            order_request = OrderRequest(side, None, qty, snapshot.symbol)
             return AgentAction(cancels=cancels, submits=[order_request])
 
         aggresive = self.rng.random() < self.aggressive_prob
@@ -82,4 +84,7 @@ class NoiseTrader(Agent):
 
         qty = int(self.rng.lognormvariate(1.5, 1.0)) + 1 # E[x] = 7.38906
 
-        return AgentAction(cancels=cancels, submits=[OrderRequest(side, price, qty)])
+        return AgentAction(cancels=cancels, submits=[OrderRequest(side, price, qty, snapshot.symbol)])
+
+    def get_symbols(self) -> list[str]:
+        return self.symbols

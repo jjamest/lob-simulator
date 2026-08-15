@@ -5,7 +5,8 @@ from typing import Optional
 from order import Order, OrderSide, Trade
 
 class OrderBook:
-    def __init__(self) -> None:
+    def __init__(self, symbol: str) -> None:
+        self.symbol = symbol
         self.bids: dict[float, deque[Order]] = defaultdict(deque)
         self.asks: dict[float, deque[Order]] = defaultdict(deque)
         self._index: dict[str, Order] = {}
@@ -141,7 +142,7 @@ class OrderBook:
 
             resting = q[0] # oldest item in deque
             fill_amount = min(aggressor.qty, resting.qty)
-            trades.append(Trade(aggressor.order_id, resting.order_id, price, fill_amount))
+            trades.append(Trade(aggressor.order_id, resting.order_id, price, fill_amount, self.symbol))
             aggressor.qty -= fill_amount
             resting.qty -= fill_amount
             if resting.qty == 0:
