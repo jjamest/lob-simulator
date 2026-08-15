@@ -1,14 +1,11 @@
-from __future__ import annotations
 import random
 from typing import Optional
 
 from agent import Agent, AgentAction
-from order import MarketSnapshot, OrderRequest, OrderSide, Trade
+from order import MarketSnapshot, OrderRequest, OrderSide
 
 
 class NoiseTrader(Agent):
-    """Random flow anchored to an internal OU fair-value process."""
-
     def __init__(
         self,
         seed: Optional[int] = None,
@@ -35,9 +32,7 @@ class NoiseTrader(Agent):
         self._resting_ids: list[str] = []
 
     def act(self, snapshot: MarketSnapshot) -> AgentAction:
-        self.fair_value += (
-            self.ou_theta * (self.ou_mu - self.fair_value) + self.ou_sigma * self.rng.gauss(0, 1)
-        )
+        self.fair_value += self.ou_theta * (self.ou_mu - self.fair_value) + self.ou_sigma * self.rng.gauss(0, 1)
 
         cancels = []
         if self._resting_ids and self.rng.random() < self.cancel_prob:
@@ -45,44 +40,46 @@ class NoiseTrader(Agent):
             self._resting_ids.remove(cancel_id)
             cancels.append(cancel_id)
 
-        return AgentAction(cancels=cancels, submits=[self._random_request(snapshot)])
-
-    def on_order_accepted(self, order_id: str, request: OrderRequest, trades: list[Trade]) -> None:
-        # only track it if it actually rested (untouched limit order)
-        if not trades and request.price is not None:
-            self._resting_ids.append(order_id)
-            if len(self._resting_ids) > self.max_resting:
-                self._resting_ids = self._resting_ids[-self.max_resting:]
-
-    def _random_request(self, snapshot: MarketSnapshot) -> OrderRequest:
-        bb, ba = snapshot.best_bid, snapshot.best_ask
-        if bb is not None and ba is not None:
-            mid = (bb + ba) / 2.0
-        elif bb is not None:
-            mid = bb + 0.50
-        elif ba is not None:
-            mid = ba - 0.50
+        submits = []
+        best_bid, best_ask = snapshot.best_bid, snapshot.best_ask
+        has_bid = best_bid is not None
+        has_ask = best_ask is not None
+        if has_bid and has_ask:
+            assert best_bid
+            assert best_ask
+            mid = (best_bid + best_ask) / 2.0
+        elif has_bid:
+            assert best_bid
+            mid = best_bid + 0.50
+        elif has_ask:
+            assert best_ask
+            mid = best_ask - 0.50
         else:
             mid = self.fair_value
 
         side = self.rng.choice([OrderSide.BID, OrderSide.ASK])
 
         if self.rng.random() < self.market_order_prob:
+            # expected value from this log normal dist = 7.38906
             qty = int(self.rng.lognormvariate(1.5, 1.0)) + 1
-            return OrderRequest(side, None, qty)
+            order_request = OrderRequest(side, None, qty)
+            return AgentAction(cancels=cancels, submits=[order_request])
 
-        aggressive = self.rng.random() < self.aggressive_prob
-        if aggressive:
+        aggresive = self.rng.random() < self.aggressive_prob
+        price = None
+        if aggresive: # will cross spread
             if side == OrderSide.BID:
-                ref = ba if ba is not None else mid
-                price = round(ref + self.rng.uniform(0.01, 0.25), 2)
+                ref = best_ask if has_ask else mid
+                price = round(ref + self.rng.uniform(0.01, 0.25), 2) # E[x] = 0.13
             else:
-                ref = bb if bb is not None else mid
+                ref = best_bid if has_bid else mid
                 price = round(ref - self.rng.uniform(0.01, 0.25), 2)
         else:
+            # passive limit order. doesn't cross spread
             # anchor to fair value rather than just mid, to follow the OU process
-            raw = self.fair_value + self.rng.uniform(-1.50, 1.50)
-            price = round(round(raw / self.tick) * self.tick, 2)
+            raw = self.fair_value + self.rng.uniform(-1.50, 1.50) # E[x] = 0
+            price = round(round(raw / self.tick) * self.tick, 2) 
 
-        qty = int(self.rng.lognormvariate(1.5, 1.0)) + 1
-        return OrderRequest(side, price, qty)
+        qty = int(self.rng.lognormvariate(1.5, 1.0)) + 1 # E[x] = 7.38906
+
+        return AgentAction(cancels=cancels, submits=[OrderRequest(side, price, qty)])

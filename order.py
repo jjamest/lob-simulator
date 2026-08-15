@@ -28,6 +28,7 @@ class Order:
             qty=request.qty,
         )
 
+
 @dataclass
 class OrderRequest:
     side: OrderSide
@@ -49,3 +50,4 @@ class MarketSnapshot:
     best_ask: Optional[float]
     bids: list[tuple[float, int]] # (price, qty), best to worst
     asks: list[tuple[float, int]] # (price, qty), best to worst
+    

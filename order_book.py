@@ -24,14 +24,21 @@ class OrderBook:
         Returns (bids, asks) sorted best-to-worst.
         """
 
-        bids = [(p, q) for p, q in
-                ((p, sum(o.qty for o in dq if not o.is_canceled)) for p, dq in self.bids.items())
-                if q > 0]
-        asks = [(p, q) for p, q in
-                ((p, sum(o.qty for o in dq if not o.is_canceled)) for p, dq in self.asks.items())
-                if q > 0]
-        bids.sort(key=lambda level: -level[0])
-        asks.sort(key=lambda level: level[0])
+        bids = []
+        for price, orders in self.bids.items():
+            total_qty = sum(o.qty for o in orders if not o.is_canceled)
+            if total_qty > 0:
+                bids.append((price, total_qty))
+
+        asks = []
+        for price, orders in self.asks.items():
+            total_qty = sum(o.qty for o in orders if not o.is_canceled)
+            if total_qty > 0:
+                asks.append((price, total_qty))
+
+        bids.sort(key=lambda x: x[0], reverse=True)
+        asks.sort(key=lambda x: x[0])
+
         return bids, asks
 
     def add(self, order: Order) -> list[Trade]:
@@ -145,53 +152,3 @@ class OrderBook:
             del resting_side[price]
 
         return trades
-
-
-if __name__ == "__main__":
-    book = OrderBook()
-
-    def event(label: str, book: "OrderBook", fn, *args) -> None:
-        print(f"\n{label}")
-        result = fn(*args)
-        if isinstance(result, list):
-            for t in result:
-                print(f"  TRADED: {t}")
-        book.print_state()
-
-    event("Add bid $99 qty=10  [B1]", book,
-          book.add, Order("B1", OrderSide.BID, 99.0, 10))
-    event("Add bid $98 qty=5   [B2]", book,
-          book.add, Order("B2", OrderSide.BID, 98.0, 5))
-    event("Add bid $99 qty=7   [B3]", book,
-          book.add, Order("B3", OrderSide.BID, 99.0, 7))
-    event("Add ask     qty=4   [M1]", book,
-          book.add, Order("M1", OrderSide.ASK, None, 4))
-    event("Add ask $101 qty=8  [A1]", book,
-          book.add, Order("A1", OrderSide.ASK, 101.0, 8))
-    event("Add ask $102 qty=4  [A2]", book,
-          book.add, Order("A2", OrderSide.ASK, 102.0, 4))
-    event("Add ask $101 qty=3  [A3]", book,
-          book.add, Order("A3", OrderSide.ASK, 101.0, 3))
-    event("Cancel B2", book, book.cancel, "B2")
-    event("Cancel ZZZZ (non-existent)", book, book.cancel, "ZZZZ")
-    event(
-        "Aggressive ask $99 qty=12",
-        book, book.add, Order("A4", OrderSide.ASK, 99.0, 12),
-    )
-    event(
-        "Aggressive bid $105 qty=6",
-        book, book.add, Order("B4", OrderSide.BID, 105.0, 6),
-    )
-    event(
-        "Bid at ask $101 qty=2",
-        book, book.add, Order("B5", OrderSide.BID, 101.0, 2),
-    )
-    event(
-        "Aggressive bid $103 qty=5",
-        book, book.add, Order("B6", OrderSide.BID, 103.0, 5),
-    )
-    event(
-        "Bid $100 qty=5",
-        book, book.add, Order("B7", OrderSide.BID, 100.0, 5),
-    )
-

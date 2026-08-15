@@ -1,7 +1,9 @@
-from __future__ import annotations
+import pandas as pd
 
 from agent import Agent
 from exchange import Exchange
+from market_maker import MarketMaker
+from noise_trader import NoiseTrader
 
 
 class Simulation:
@@ -14,51 +16,66 @@ class Simulation:
             snapshot = self.exchange.snapshot()
             action = agent.act(snapshot)
 
+            # perform all specified cancels
             for order_id in action.cancels:
                 self.exchange.cancel(order_id)
 
+            # do submits
             for request in action.submits:
-                order_id, trades = self.exchange.submit(request)
+                order_id, trades = self.exchange.submit((request))
                 agent.on_order_accepted(order_id, request, trades)
                 for trade in trades:
                     for other in self.agents:
-                        other.on_fill(trade)
+                        other.on_fill(trade) # includes all, so each needs to have their own checks to see if a trade is their own
 
     def run(self, steps: int) -> None:
         for _ in range(steps):
             self.step()
 
 
-if __name__ == "__main__":
-    import pandas as pd
+exchange = Exchange()
+mm = MarketMaker(qty=100, skew_k=0.1)
+mm2 = MarketMaker(qty=1000)
+noise = NoiseTrader(seed=11)
+sim = Simulation(exchange, [mm2, mm, noise])
 
-    from market_maker import MarketMaker
-    from noise_trader import NoiseTrader
+SNAPSHOT_EVERY = 100
+STEPS = 1_000
 
-    exchange = Exchange()
-    mm = MarketMaker()
-    noise = NoiseTrader(seed=111)
-    sim = Simulation(exchange, [mm, noise])
+mm_rows = []
+mm2_rows = []
+for i in range(1, STEPS + 1):
+    sim.step()
+    if i % SNAPSHOT_EVERY == 0:
+        print("On", i)
+        snap = exchange.snapshot()
+        mid = (snap.best_bid + snap.best_ask) / 2.0 if snap.best_bid and snap.best_ask else noise.fair_value
+        pnl = mm.cash + mm.position * mid
 
-    SNAPSHOT_EVERY = 1_000
-    STEPS = 10_000
+        pnl2 = mm2.cash + mm2.position * mid
 
-    rows = []
-    for i in range(1, STEPS + 1):
-        sim.step()
-        if i % SNAPSHOT_EVERY == 0:
-            snap = exchange.snapshot()
-            mid = (snap.best_bid + snap.best_ask) / 2.0 if snap.best_bid and snap.best_ask else noise.fair_value
-            pnl = mm.cash + mm.position * mid
-            rows.append({
-                "step": i,
-                "position": mm.position,
-                "cash": round(mm.cash, 2),
-                "pnl": round(pnl, 2),
-                "mid": round(mid, 2),
-                "fair_value": round(noise.fair_value, 2),
-            })
+        mm_rows.append({
+            "step": i,
+            "position": mm.position,
+            "cash": round(mm.cash, 2),
+            "pnl": round(pnl, 2),
+            "mid": round(mid, 2),
+            "fair_value": round(noise.fair_value, 2),
+        })
 
-    df = pd.DataFrame(rows).set_index("step")
-    pd.set_option("display.float_format", lambda v: f"{v:,.2f}")
-    print(df)
+        mm2_rows.append({
+                    "step": i,
+                    "position": mm2.position,
+                    "cash": round(mm2.cash, 2),
+                    "pnl": round(pnl, 2),
+                    "mid": round(mid, 2),
+                    "fair_value": round(noise.fair_value, 2),
+                })
+
+df = pd.DataFrame(mm_rows).set_index("step")
+pd.set_option("display.float_format", lambda v: f"{v:,.2f}")
+print(df)
+
+# df2 = pd.DataFrame(mm2_rows).set_index("step")
+# pd.set_option("display.float_format", lambda v: f"{v:,.2f}")
+# print(df2)
