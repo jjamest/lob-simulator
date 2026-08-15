@@ -4,3 +4,4 @@ __pycache__/
 trades.log
 .git/
 # mm_position.png
+.vscode/
