@@ -1,5 +1,3 @@
-from collections import defaultdict
-
 import pandas as pd
 
 from agent import Agent
